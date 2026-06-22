@@ -6,7 +6,6 @@ import copy as copy
 
 t = sy.symbols('t',real = True)
 
-
 "si plus de que un paramètre(k) modifier les lignes 30 et 38 et les jouter en variable sympy"
 
 #C = [Ci] liste des trajectoires
@@ -25,7 +24,6 @@ t = sy.symbols('t',real = True)
 
 ## modélisation
 
-
 #liste des valeurs de fonctions pour x valeurs de temps dans X
 def value(X,Ki,F):
     return [[float(f.evalf(subs={t:x,m:Ki[0],x0:Ki[1],y0:Ki[2]})) for x in X] for f in F]
@@ -37,7 +35,7 @@ def valide(X,Ki,F):
     for x in X:
         for f in F:
             val = f.subs({t:x,m:Ki[0],x0:Ki[1],y0:Ki[2]})
-            if type(val) is sy.core.numbers.NaN or float(sy.im(val))!=0 or type(val) is not (float or int):
+            if type(val) is sy.core.numbers.NaN or float(sy.im(val))!=0:
                 return False
     return True
 
@@ -52,7 +50,7 @@ def ecart(Ci,Ki,F):
     return e
 
 # somme des écarts aux trajéctoires
-def ecart_tot(C,K_val,F):
+def ecart_tot(F):
     if not all(valide(Ci.keys(), Ki, F) for Ci, Ki in zip(C, K_val)):
         return float('inf')
     e = 0
@@ -63,17 +61,17 @@ def ecart_tot(C,K_val,F):
 ## graphique
 
 # trajéctoire et la courbe l'approximent
-def trace(Ci,Ki,K_val,F):
+def trace(i_exp,F):
+    Ci,Ki = C[i_exp],K_val[i_exp]
     if not valide(Ci.keys(),Ki,F):
         return "fonctions pas biens définis sur l'intervalle"
-    X,Y,A,B = [],[],[],[]
     X,Y = [[x[i] for x in Ci.values()] for i in [0,1]]
     A,B = value(Ci.keys(),Ki,F)
 
     plt.figure()
     plt.plot(X,Y,label='f',color='black')
     plt.plot(A,B,label='g',color='blue')
-    plt.axis([min(X+A),max(X+A),min(Y+B),max(Y+B)])
+    plt.margins(0.01)
     plt.title('approximation g de la trajéctoire f')
     plt.legend()
     plt.show()
@@ -83,57 +81,80 @@ def trace(Ci,Ki,K_val,F):
 def gauss(a,x):
     return ma.exp(-(x/a)**2)
 
-def mutation(K_var,F,m_prob,range_k):
-    return [mutation_f(K_var,f,m_prob,range_k) for f in F]
+def mutation(F):
+    return [mutation_f(f) for f in F]
 
-def mutation_f(K_var,f,m_prob,range_k):
+def mutation_f(f):
+    if f is None:
+        f = add_op(f)
     f_mut = copy.copy(f)
     if rd.random()<m_prob:
-        mut = rd.choice([add_op,swap_op,del_op,change_cst])
-        f_mut = mut(K_var,f_mut,m_prob,range_k)
-    if f is None:
-        print('None')
+        mut = rd.choices([add_op,del_op,swap_op,change_cst],weights=[1,1,7,10])[0]
+        f_mut = mut(f)
     return f_mut
 
+def parcour(f,target_index,i=0):#Si i!∈[0,nb_node_f(f)-1] parcour=None
+    if i == target_index:
+        return f
+    for arg in f.args:
+        i += 1
+        res = parcour(arg,target_index,i)
+        if res is not None:
+            return res
+    return None
+
+def valide_expr(expr):
+    if expr is None:
+            return False
+    if expr.has(sy.nan) or expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo):
+        return False
+    if sy.im(expr) != 0:
+        return False
+    return True
+
 #ajout d'une opération entre une partie de f et une cste k (comme définie dans cst)
-def add_op(K_var,f,m_prob,range_k):
-    a = rd.choice([a for a in sy.preorder_traversal(f)])
+def add_op(f):
+    expr = parcour(f,rd.randrange(0,nb_node_f(f)))
     type = rd.randint(1,2)
     op = rd.choice(OP[type])
-    if type==2:
-        return f.subs(a,op(a,cst(K_var,range_k)))
+    if type==2 :
+        new = op(expr,cst())
+        if valide_expr(new):
+            return f.subs(expr,new)
+        else:
+            return f
     else:#opération à une seule vaiable
-        return f.subs(a,op(a))
+        new = op(expr)
+        if valide_expr(new):
+            return f.subs(expr,new)
+        else:
+            return f
 
 #cste ∈ [t, paramètres, Réel∈[-range_k,range_k]]
-def cst(K_var,range_k,old=0):
+def cst(old=0):
     if old != 0:
-        new = old*1.2
+        new = old*(1/range_k)#arbitraire
     else:
-        new = rd.uniform(-range_k,range_k)
+        new = sy.Float(rd.uniform(-range_k,range_k))
     return rd.choice([t,rd.choice(K_var),new])
 
 #modifie un opérateur ex: + -> x
-#choisi une fonction parmis f qui soit une opération entre deux fonctions et la substitue par une autre opération(de type 2)
-def swap_op(K_var,f,m_prob,range_k):
-    expr_sup_1 = [exp for exp in sy.postorder_traversal(f) if len(exp.args)>=2]
-    if len(expr_sup_1)==0:
+#choisi une fonction parmis f qui soit une opération entre deux fonctions et la substitue par une autre opération
+def swap_op(f):
+    EXPR = [exp for exp in sy.postorder_traversal(f) if len(exp.args)>=2]
+    if not EXPR:
         return f
-    expr = rd.choice(expr_sup_1)
-    op = rd.choice(OP[2])#nouvelle opération
-    return f.subs(expr,op(expr.args[0],expr.args[1]))
+    expr = rd.choice(EXPR)
+    n = len(expr.args)
+
+    if n in OP:
+        op = rd.choice(OP[n])
+        return f.subs(expr,op(*expr.args))
 
 #modifie valeur d'une constante aléatoirement choisie
-def change_cst(K_var,f,m_prob,range_k):
-    EXPR = list(sy.postorder_traversal(f))
-    EXPR = rd.sample(EXPR,k=len(EXPR))#peut pas utiliser shuffle car EXPR immutable
-    expr = EXPR[0]
-    i = 0
-    while i<len(EXPR) and type(EXPR[i]) is not sy.core.numbers.Integer:
-        i += 1
-    if i<len(EXPR):
-        f = f.subs(expr,cst(K_var,range_k,expr))
-    return f
+def change_cst(f):
+    EXPR = [ex for ex in sy.postorder_traversal(f) if not ex.args]
+    return f.subs(rd.choice(EXPR),cst())
 
 OP_1 = [sy.exp,sy.ln,sy.cos,sy.sin,sy.tan,sy.acos,sy.asin,sy.atan,sy.cosh,sy.sinh,sy.tanh]
 OP_2 = [sy.Add,sy.Mul,sy.Pow]
@@ -148,67 +169,54 @@ def type_op(expr):
     return 0
 
 #supprime une partie de la fonction
-def del_op(K_var,f,m_prob,range_k):
-    expr = rd.choice([exp for exp in sy.postorder_traversal(f)])
-    t = type_op(expr)
-    if t==2:
+def del_op(f):
+    expr = parcour(f,rd.randrange(0,nb_node_f(f)))
+    t = len(expr.args)
+    if t==2:#on del un des deux aléatoirement
         return f.subs(expr,rd.choice(expr.args))
     elif t==1:
         return f.subs(expr,expr.args[0])
-    else:#unique nombre
+    else:#Integer
         return f
 
-def creation(P,K_var,n_P,unchg,m_prob,range_k):
+def creation(P):
     n = len(P)
     W = [gauss(n,i) for i in range(n)]
-    return P[:unchg] + [mutation(K_var,F,m_prob,range_k) for F in rd.choices(P,weights=W,k=n_P-unchg)]
+    return P[:unchg] + [mutation(F) for F in rd.choices(P,weights=W,k=n_P-unchg)]
 
 ## évolution
 
-# nb cstes + nb opérateurs
-def complexite(F):
-    c = 0
-    for f in F:
-        c += len(list(sy.preorder_traversal(f)))
-    return c
+def nb_node(F):
+    return sum(nb_node_f(f) for f in F)
+
+def nb_node_f(f):
+    if not f.args:
+        return 1
+    else:
+        return sum(nb_node_f(arg) for arg in f.args) + 1
 
 # évaluation d'une approximation
-def fitness(C,K_val,F):
-    return ecart_tot(C,K_val,F) + complexite(F)
+def fitness(F):
+    return ecart_tot(F) + nb_node(F)
 
-def selection(C,K_val,P,select):
-    FIT_P = TriFusion([(fitness(C,K_val,F),F) for F in P])#[(fit,F),...]
-    return [FIT_P[i][1] for i in range(select)]
+def selection(P):#tri décroissant en fonction de fitness(x[0])
+    FIT_P = sorted([(fitness(F),F) for F in P], key=lambda x: x[0])
+    return [FIT_P[i][1] for i in range(n_sel)]
 
-def Fusion(M,N):
-    if M==[]:
-        return N
-    elif N==[]:
-        return M
-    elif M[0][0]<=N[0][0]:
-        return [M[0]]+Fusion(M[1:],N)
-    else:
-        return [N[0]]+Fusion(M,N[1:])
+def ini_P():
+    F = [t]*2
+    return [[add_op(f) for f in F] for _ in range(n_P)]
 
-def TriFusion(L):
-    n=len(L)
-    if n<2:
-        return(L)
-    else:
-        l=n//2
-        return(Fusion(TriFusion(L[:l]),TriFusion(L[l:])))
 
-def ini_P(K_var,n_P,m_prob,range_k):
-    F = [sy.Integer(0)]*2
-    return [[add_op(K_var,f,m_prob,range_k) for f in F] for _ in range(n_P)]
-
-def evolution(C,K_var,K_val,eps,g_max,n_P,select,m_prob,unchg,range_k,i=0):
-    P = ini_P(K_var,n_P,m_prob,range_k)
-    while i<g_max and ecart_tot(C,K_val,P[0])>eps:#P[0]=meilleur
+def evolution(i=0):
+    P = ini_P()
+    while i<g_max and ecart_tot(P[0])>eps:#P[0]=meilleur
         i += 1
-        P = creation(P,K_var,n_P,unchg,m_prob,range_k)
-        P = selection(C,K_val,P,select)
-    return P[0]
+        P = creation(P)
+        P = selection(P)
+        if i%40==0:
+            print(i,"-ième génération")
+    return P[0],ecart_tot(P[0])
 
 ## evolution matriciel
 import numpy as np
@@ -220,7 +228,7 @@ def ini_M(COORD,K_var,n_M,m_prob,range_k):
         M[i][j] = {'F':[add_op(K_var,f,m_prob,range_k) for f in F],'e':[]}
     for i,j in COORD:
         M[i][j]['adj_co'] = ini_voisin(M,n_M,i,j)
-        M[i][j]['fit'] = fitness(C,K_val,M[i][j]['F'])
+        M[i][j]['fit'] = fitness(M[i][j]['F'])
     return M
 
 VOISIN_DIR = [(0,1),(0,-1),(1,0),(-1,0),(1,1),(-1,1),(1,-1),(-1,-1)]
@@ -275,6 +283,16 @@ def var_M(M,COORD,n_M,pow):
 def ecrat_type_M(M,COORD,n_M):
     return ma.sqrt(var_M(M,COORD,n_M,pow))
 
+
+##Paramètres génétiques:
+
+eps =       10
+n_P =       100
+g_max =     100
+n_sel =     60
+m_prob =    0.01
+unchg =     5
+range_k =   10
 
 ## data
 #ballon m :
@@ -382,10 +400,3 @@ y0 = sy.symbols('y0',real=True)
 K_var = [m,x0,y0]
 
 C = [C1,C2,C3]
-
-
-
-
-
-
-
