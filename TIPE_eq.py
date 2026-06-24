@@ -24,9 +24,17 @@ t = sy.symbols('t',real = True)
 
 ## modélisation
 
+def lambdify_F(F):#plus rapde que sympy
+    args = (t,*K_var)
+    return tuple(sy.lambdify(args, f, 'numpy') for f in F)
+
+
 #liste des valeurs de fonctions pour x valeurs de temps dans X
 def value(X,Ki,F):
-    return [[float(f.evalf(subs={t:x,m:Ki[0],x0:Ki[1],y0:Ki[2]})) for x in X] for f in F]
+    X = np.array(list(X))
+    args = (X,*Ki)
+    fx,fy = lambdify_F(F)
+    return fx(*args),fy(*args)
 
 # validité d'une fonction sur un l'intervale de temps
 def valide(X,Ki,F):
@@ -41,13 +49,10 @@ def valide(X,Ki,F):
 
 # somme des écarts aux points d'une trajéctoire
 def ecart(Ci,Ki,F):
-    X_Y = [[x[i] for x in Ci.values()] for i in [0,1]]
-    A_B = value(Ci.keys(),Ki,F)
+    X,Y = (np.array([x[i] for x in Ci.values()]) for i in [0,1])
+    A,B = value(Ci.keys(),Ki,F)
     e = 0
-    for i in [0,1]:
-        for a,b in zip(X_Y[i],A_B[i]):
-            e += abs(a-b)
-    return e
+    return np.sum(np.abs(X - A)) + np.sum(np.abs(Y - B))
 
 # somme des écarts aux trajéctoires
 def ecart_tot(F):
@@ -87,11 +92,8 @@ def mutation(F):
 def mutation_f(f):
     if f is None:
         f = add_op(f)
-    f_mut = copy.copy(f)
-    if rd.random()<m_prob:
-        mut = rd.choices([add_op,del_op,swap_op,change_cst],weights=[1,1,7,10])[0]
-        f_mut = mut(f)
-    return f_mut
+    mut = rd.choices([add_op,del_op,swap_op,change_cst],weights=[1,1,7,7])[0]
+    return mut(f)
 
 def parcour(f,target_index,i=0):#Si i!∈[0,nb_node_f(f)-1] parcour=None
     if i == target_index:
@@ -204,95 +206,139 @@ def selection(P):#tri décroissant en fonction de fitness(x[0])
     return [FIT_P[i][1] for i in range(n_sel)]
 
 def ini_P():
-    F = [t]*2
-    return [[add_op(f) for f in F] for _ in range(n_P)]
+    ini_P = []
+    for _ in range(n_P):
+        F = [cst(),cst()]
+        ini_P.append([f for f in F])
+    return ini_P
 
 
-def evolution(i=0):
+def evolution(i=1):
     P = ini_P()
-    while i<g_max and ecart_tot(P[0])>eps:#P[0]=meilleur
+    while i<=g_max and ecart_tot(P[0])>eps:#P[0]=meilleur
         i += 1
         P = creation(P)
         P = selection(P)
-        if i%40==0:
+        if i%20==0:
             print(i,"-ième génération")
     return P[0],ecart_tot(P[0])
+
+def ini_P_v2():#P = [(F,fit(F), ...]
+    ini_P = []
+    for _ in range(n_P):
+        F = [cst(),cst()]
+        ini_P.append((F,fitness(F)))
+    return ini_P
+
+#P[0][0] = F
+#P[0] = (F,fit(F))
+def evolution_v2(i=1):
+    P = ini_P_v2()
+    while i<=g_max and ecart_tot(P[0][0])>eps:
+        i += 1
+        if i%20==0:
+            print(i,"-ième génération")
+            print("best_F,fit:",P[0][0],P[0][1],"\n")
+        for Pi in P:
+            F_mut = mutation(Pi[0])
+            F_mut_fit = fitness(F_mut)
+            P = insertion(P,(F_mut,F_mut_fit))
+        P = P[:n_P]
+    return P[0][0],ecart_tot(P[0][0])
+
+#insert un individu en gardant un ordre un ordre croissant (de fitness)
+def insertion(P,F):
+    k = 0
+    while k<len(P) and F[1]>=P[k][1] : # trouve l'emplacement adapté du nouvel élément et on l'insert
+        k+=1
+    return P[:k] + [F] + P[k:]
 
 ## evolution matriciel
 import numpy as np
 
-def ini_M(COORD,K_var,n_M,m_prob,range_k):
+def ini_M():
     M = np.zeros((n_M,n_M),dtype=object)
-    F = [sy.Integer(0)]*2
     for i,j in COORD:
-        M[i][j] = {'F':[add_op(K_var,f,m_prob,range_k) for f in F],'e':[]}
+        M[i][j] = {'F':[cst() for _ in range(2)],'e':[]}
     for i,j in COORD:
-        M[i][j]['adj_co'] = ini_voisin(M,n_M,i,j)
+        M[i][j]['adj_co'] = ini_voisin_co(M,i,j)#coord des voisins
         M[i][j]['fit'] = fitness(M[i][j]['F'])
     return M
 
-VOISIN_DIR = [(0,1),(0,-1),(1,0),(-1,0),(1,1),(-1,1),(1,-1),(-1,-1)]
+VOISIN_DIR = [(0,1),(0,-1),(1,0),(-1,0)]
 
 #les voisins d'une coord (ortho + diago + lui même)
-def ini_voisin(M,n_M,i,j):
-    V = [M[i][j]]
+def ini_voisin_co(M,i,j):
+    V = [(i,j)]
     for a,b in VOISIN_DIR:
         if 0<=i+a<n_M and 0<=j+b<n_M :#si dans le matrice
             V.append((i+a,j+b))
     return V
 
 #n_M la taille de la matrice
-def evolution_mat(C,K_var,K,val,eps,g_max,n_M,select,m_prob,unchg,range_k,i=0):
-    COORD = [(i,j) for i in range(n_M) for j in range(n_M)]
-    M = ini_M(COORD,K_var,n_M,m_prob,range_k)
-    ecart_best,F_best = best_M(M,COORD,C,K_val)
-    while i<g_max and ecart_min>eps:
+def evolution_mat(i=1):
+    M = ini_M()
+    fit_min,F_best = best_L(np.ravel(M))
+
+    while i<=g_max and ecart_tot(F_best)>eps:
         i += 1
+        if i%20==0:
+            print(i,"-ième génération")
+        #Pour chaque individu créé des mutations(enfants) de lui même à tout ses voisins
         for i,j in COORD:
-            for a_v,b_v in M[i][j]['adj_co']:
-                F_v = M[a_v][b_v]
-                M[i][j]['e'].append(mutation(K_var,F_v,m_prob,range_k))
+            for i_v,j_v in M[i][j]['adj_co']:#C : 9*n_M**2
+                e = mutation(M[i_v][j_v]['F'])
+                M[i][j]['e'].append({'F':e,'fit':fitness(e)})
+        #pour tout individus si son meilleur enfant est meilleur que lui on le remplace
         for i,j in COORD:
-            e_fit,e_F = best_e(M[i][j]['e'])#meilleur enfant
+            e_fit,e_F = best_L(M[i][j]['e'])
             if e_fit<M[i][j]['fit']:
                 M[i][j]['F'] = e_F
                 M[i][j]['fit'] = e_fit
-        ecart_best,F_best = best_M(M,COORD,C,K_val)
-    print (best_M(M,K_val))
-    return M
+            M[i][j]['e'] = []
+
+        fit_min,F_best = best_L(np.ravel(M))
+
+    return F_best,ecart_tot(F_best)
+
+#l'écart du meilleur individu d'aprés fitness, prend une liste
+def best_L(L):
+    fit_min, F_best = L[0]['fit'],L[0]['F']
+    for F_dict in L:
+        if F_dict['fit']<fit_min:
+            fit_min = F_dict['fit']
+            F_best = F_dict['F']
+    return fit_min,F_best
 
 
-#l'écart du meilleur individu d'aprés fitness, l'individu
-def best_M(M,COORD,C,K_val):
-    fit_min, F_best = M[0][0]['fit'],M[0][0]
-    for F in (M[lign] for lign in M):
-        if F['fit']<fit_min:
-            fit_min = F['fit']
-            F_best = F
-    return ecart_tot(C,K_val,F),F_best
-
-def moy_M(M,COORD,n_M,pow=1):
+def moy_M(M,pow=1):
     s = 0
     for i,j in COORD:
         s +=M[i][j]['fit']**pow
     return s/(n_M**2)
 
 def var_M(M,COORD,n_M,pow):
-    return moy_M(M,COORD,n_M,2) - moy_M(M,COORD,n_M)**2
+    return moy_M(M,2) - moy_M(M)**2
 
-def ecrat_type_M(M,COORD,n_M):
-    return ma.sqrt(var_M(M,COORD,n_M,pow))
+def ecrat_type_M(M):
+    return ma.sqrt(var_M(M))
 
 
 ##Paramètres génétiques:
 
-eps =       10
-n_P =       100
-g_max =     100
-n_sel =     60
-m_prob =    0.01
-unchg =     5
-range_k =   10
+#Paramètres
+eps     = 15
+g_max   = 100
+n_sel   = 20
+unchg   = 5
+range_k = 10
+
+#evolution classique
+n_P     = 50
+
+#evolution mat
+n_M     = 5
+COORD = [(i,j) for i in range(n_M) for j in range(n_M)]
 
 ## data
 #ballon m :
