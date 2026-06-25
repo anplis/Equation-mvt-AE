@@ -24,76 +24,72 @@ t = sy.symbols('t',real = True)
 
 ## modélisation
 
-def lambdify_F(F):#plus rapde que sympy
-    args = (t,*K_var)
-    return tuple(sy.lambdify(args, f, 'numpy') for f in F)
-
-
 #liste des valeurs de fonctions pour x valeurs de temps dans X
-def value(X,Ki,F):
-    X = np.array(list(X))
-    args = (X,*Ki)
-    fx,fy = lambdify_F(F)
-    return fx(*args),fy(*args)
+def value(X,Ki,f):
+    if f is None:
+        return False
+    V=[]
+    for x in X:
+        val = float(f.evalf(subs={t:x,m:Ki[0],x0:Ki[1],y0:Ki[2]}))
+        if not valide(val):
+            return False
+        V.append(val)
+    return V
 
 # validité d'une fonction sur un l'intervale de temps
-def valide(X,Ki,F):
-    if any(f is None for f in F):
-        return False
-    for x in X:
-        for f in F:
-            val = f.subs({t:x,m:Ki[0],x0:Ki[1],y0:Ki[2]})
-            if type(val) is sy.core.numbers.NaN or float(sy.im(val))!=0:
-                return False
-    return True
+def valide(val):
+    return type(val) is not sy.core.numbers.NaN and float(sy.im(val))==0
 
 # somme des écarts aux points d'une trajéctoire
-def ecart(Ci,Ki,F):
-    X,Y = (np.array([x[i] for x in Ci.values()]) for i in [0,1])
-    A,B = value(Ci.keys(),Ki,F)
-    e = 0
-    return np.sum(np.abs(X - A)) + np.sum(np.abs(Y - B))
+def ecart(Ci,Ki,f,var):
+    X = [x[var] for x in Ci.values()]#coord x ou y
+    A = value(Ci.keys(),Ki,f)
+    if A==False:
+        return False
+    return sum(abs(x-a) for x,a in zip(X,A))
 
 # somme des écarts aux trajéctoires
-def ecart_tot(F):
-    if not all(valide(Ci.keys(), Ki, F) for Ci, Ki in zip(C, K_val)):
-        return float('inf')
+def ecart_tot(f,var):
     e = 0
     for Ci,Ki in zip(C,K_val):
-        e += ecart(Ci,Ki,F)
+        ec = ecart(Ci,Ki,f,var)
+        if ec==False:
+            return False
+        e += ec
     return e
 
 ## graphique
 
 # trajéctoire et la courbe l'approximent
 def trace(i_exp,F):
+    fig, ax = plt.subplots()
     Ci,Ki = C[i_exp],K_val[i_exp]
-    if not valide(Ci.keys(),Ki,F):
-        return "fonctions pas biens définis sur l'intervalle"
+    A,B = [value(Ci.keys(),Ki,f) for f in F]
     X,Y = [[x[i] for x in Ci.values()] for i in [0,1]]
-    A,B = value(Ci.keys(),Ki,F)
 
-    plt.figure()
-    plt.plot(X,Y,label='f',color='black')
-    plt.plot(A,B,label='g',color='blue')
-    plt.margins(0.01)
-    plt.title('approximation g de la trajéctoire f')
+    ax.plot(X,Y,label='traj',color='black')
+    ax.plot(A,B,label='F',color='blue')
+    ax.set_aspect('equal',adjustable='datalim')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.margins(0.1)
+    plt.title('approximation F de la trajéctoire')
     plt.legend()
     plt.show()
 
 ## modification génétique
 
-def gauss(a,x):
-    return ma.exp(-(x/a)**2)
+def gauss(x):
+    return ma.exp(-(x/n_P)**2)
 
-def mutation(F):
-    return [mutation_f(f) for f in F]
-
-def mutation_f(f):
+def mutation(f):
     if f is None:
-        f = add_op(f)
+        return cst()
     mut = rd.choices([add_op,del_op,swap_op,change_cst],weights=[1,1,7,7])[0]
-    return mut(f)
+    f_mut = mut(f)
+    if valide_expr(f_mut):
+        return f_mut
+    return f
 
 def parcour(f,target_index,i=0):#Si i!∈[0,nb_node_f(f)-1] parcour=None
     if i == target_index:
@@ -116,21 +112,15 @@ def valide_expr(expr):
 
 #ajout d'une opération entre une partie de f et une cste k (comme définie dans cst)
 def add_op(f):
-    expr = parcour(f,rd.randrange(0,nb_node_f(f)))
+    expr = parcour(f,rd.randrange(0,nb_node(f)))
     type = rd.randint(1,2)
     op = rd.choice(OP[type])
     if type==2 :
         new = op(expr,cst())
-        if valide_expr(new):
-            return f.subs(expr,new)
-        else:
-            return f
-    else:#opération à une seule vaiable
+        return f.subs(expr,new)
+    else:
         new = op(expr)
-        if valide_expr(new):
-            return f.subs(expr,new)
-        else:
-            return f
+        return f.subs(expr,new)
 
 #cste ∈ [t, paramètres, Réel∈[-range_k,range_k]]
 def cst(old=0):
@@ -138,7 +128,9 @@ def cst(old=0):
         new = old*(1/range_k)#arbitraire
     else:
         new = sy.Float(rd.uniform(-range_k,range_k))
-    return rd.choice([t,rd.choice(K_var),new])
+    new_cst = rd.choice([t,*K_var,new])
+    sign = rd.choice([sy.Integer(-1),sy.Integer(1)])
+    return sy.Mul(sign,new_cst)
 
 #modifie un opérateur ex: + -> x
 #choisi une fonction parmis f qui soit une opération entre deux fonctions et la substitue par une autre opération
@@ -172,7 +164,7 @@ def type_op(expr):
 
 #supprime une partie de la fonction
 def del_op(f):
-    expr = parcour(f,rd.randrange(0,nb_node_f(f)))
+    expr = parcour(f,rd.randrange(0,nb_node(f)))
     t = len(expr.args)
     if t==2:#on del un des deux aléatoirement
         return f.subs(expr,rd.choice(expr.args))
@@ -181,77 +173,58 @@ def del_op(f):
     else:#Integer
         return f
 
-def creation(P):
-    n = len(P)
-    W = [gauss(n,i) for i in range(n)]
-    return P[:unchg] + [mutation(F) for F in rd.choices(P,weights=W,k=n_P-unchg)]
-
 ## évolution
 
-def nb_node(F):
-    return sum(nb_node_f(f) for f in F)
-
-def nb_node_f(f):
+def nb_node(f):
     if not f.args:
         return 1
     else:
-        return sum(nb_node_f(arg) for arg in f.args) + 1
+        return sum(nb_node(arg) for arg in f.args) + 1
 
 # évaluation d'une approximation
-def fitness(F):
-    return ecart_tot(F) + nb_node(F)
+def fitness(f,var):
+    ec_tot = ecart_tot(f,var)
+    if ec_tot==False:
+        return float('inf')
+    return ec_tot + c*nb_node(f)
 
-def selection(P):#tri décroissant en fonction de fitness(x[0])
-    FIT_P = sorted([(fitness(F),F) for F in P], key=lambda x: x[0])
-    return [FIT_P[i][1] for i in range(n_sel)]
-
-def ini_P():
+def ini_P(var):#P = [(F,fit(F), ...]
     ini_P = []
     for _ in range(n_P):
-        F = [cst(),cst()]
-        ini_P.append([f for f in F])
-    return ini_P
-
-
-def evolution(i=1):
-    P = ini_P()
-    while i<=g_max and ecart_tot(P[0])>eps:#P[0]=meilleur
-        i += 1
-        P = creation(P)
-        P = selection(P)
-        if i%20==0:
-            print(i,"-ième génération")
-    return P[0],ecart_tot(P[0])
-
-def ini_P_v2():#P = [(F,fit(F), ...]
-    ini_P = []
-    for _ in range(n_P):
-        F = [cst(),cst()]
-        ini_P.append((F,fitness(F)))
+        f = cst()
+        ini_P.append((f,fitness(f,var)))
     return ini_P
 
 #P[0][0] = F
-#P[0] = (F,fit(F))
-def evolution_v2(i=1):
-    P = ini_P_v2()
-    while i<=g_max and ecart_tot(P[0][0])>eps:
-        i += 1
-        if i%20==0:
-            print(i,"-ième génération")
-            print("best_F,fit:",P[0][0],P[0][1],"\n")
-        for Pi in P:
-            F_mut = mutation(Pi[0])
-            F_mut_fit = fitness(F_mut)
-            P = insertion(P,(F_mut,F_mut_fit))
-        P = P[:n_P]
-    return P[0][0],ecart_tot(P[0][0])
+#P[0] = (f,fit(f))
+def evolution():
+    F,FIT = [],[]
+    W = [gauss(i) for i in range(n_P)]
+    for var in [0,1]:
+        i=1
+        P = ini_P(var)
+        while i<=g_max and ecart_tot(P[0][0],var)>eps:
+            i += 1
+            if i%20==0:
+                print(i,"-ième génération")
+                print("best_F,fit:",P[0][0],",",P[0][1],"\n")
+
+            for Pi in rd.choices(P,weights=W,k=n_P):
+                F_mut = mutation(Pi[0])
+                F_mut_fit = fitness(F_mut,var)
+                P = insertion(P,(F_mut,F_mut_fit))
+            P = P[:n_P]
+
+        F.append(P[0][0])
+        FIT.append(P[0][1])
+    return F,FIT
 
 #insert un individu en gardant un ordre un ordre croissant (de fitness)
-def insertion(P,F):
+def insertion(P,f_fit):
     k = 0
-    while k<len(P) and F[1]>=P[k][1] : # trouve l'emplacement adapté du nouvel élément et on l'insert
+    while k<len(P) and f_fit[1]>=P[k][1] : # trouve l'emplacement adapté du nouvel élément et on l'insert
         k+=1
-    return P[:k] + [F] + P[k:]
+    return P[:k] + [f_fit] + P[k:]
 
 ## evolution matriciel
 import numpy as np
@@ -259,7 +232,7 @@ import numpy as np
 def ini_M():
     M = np.zeros((n_M,n_M),dtype=object)
     for i,j in COORD:
-        M[i][j] = {'F':[cst() for _ in range(2)],'e':[]}
+        M[i][j] = {'f':cst(),'e':[]}
     for i,j in COORD:
         M[i][j]['adj_co'] = ini_voisin_co(M,i,j)#coord des voisins
         M[i][j]['fit'] = fitness(M[i][j]['F'])
@@ -327,20 +300,20 @@ def ecrat_type_M(M):
 ##Paramètres génétiques:
 
 #Paramètres
-eps     = 15
+eps     = 2
 g_max   = 100
-n_sel   = 20
-unchg   = 5
 range_k = 10
+c       = 0.1
 
 #evolution classique
-n_P     = 50
+n_P     = 100
 
 #evolution mat
 n_M     = 5
 COORD = [(i,j) for i in range(n_M) for j in range(n_M)]
 
 ## data
+
 #ballon m :
 k1 = (19,1.53,2.64)
 C1 = {
