@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import sympy as sy
 import random as rd
 import copy as copy
+import numpy as np
 
 t = sy.symbols('t',real = True)
 
@@ -25,28 +26,34 @@ t = sy.symbols('t',real = True)
 ## modélisation
 
 #liste des valeurs de fonctions pour x valeurs de temps dans X
-def value(Ki,f):
+def value(Ki, f):
     if f is None:
         return False
-    V=[]
-    for x in T:
-        val = f.evalf(subs={t:x,L:Ki[0],x0:Ki[1],y0:Ki[2]})
-        if not valide(val):
+    try :
+        f_num = sy.lambdify((t, *K_var), f, modules="numpy")
+
+        with np.errstate(all="ignore"):
+            A = f_num(T, *Ki)
+
+        if not valide(A):
             return False
-        V.append(val)
-    return V
+
+        return A
+
+    except Exception:
+        return False
 
 # validité d'une fonction sur un l'intervale de temps
-def valide(val):
-    return type(val) is not sy.core.numbers.NaN and float(sy.im(val))==0 and val.is_finite
+def valide(A):
+    return np.all(np.isfinite(A)) and not np.iscomplexobj(A) and np.max(np.abs(A)) < 1e6
 
 # somme des écarts quadratiques aux points d'une trajéctoire
 def ecart(Ci,Ki,f,var):
-    X = [x[var] for x in Ci]#coord x ou y
+    X = np.array([x[var] for x in Ci])#coord x ou y
     A = value(Ki,f)
-    if A==False:
+    if A is False:
         return False
-    return sum((x-a)**2 for x,a in zip(X,A))
+    return np.sum((X - A)**2)
 
 # somme des écarts quadratiques aux points des trajéctoires
 def ecart_tot(f,var):
@@ -65,6 +72,8 @@ def trace(i_exp,F):
     fig, ax = plt.subplots()
     Ci,Ki = C[i_exp],K_val[i_exp]
     A,B = [value(Ki,f) for f in F]
+    if A is False or B is False:
+        return "fonction mal définie"
     X,Y = [[x[i] for x in Ci] for i in [0,1]]
 
     ax.plot(X,Y,label='traj',color='black')
@@ -106,25 +115,44 @@ def trace_anim(i_exp):
         repeat=False)
     plt.show()
 
-def trace_anim2(i_exp,F):
-    # Trajectoire 1
-    X1, Y1 = [[x[i] for x in C[i_exp]] for i in [0,1]]
+def trace_anim2(i_exp, F):
+    # Trajectoire réelle
+    X1 = np.array([p[0] for p in C[i_exp]], dtype=float)
+    Y1 = np.array([p[1] for p in C[i_exp]], dtype=float)
 
-    # Trajectoire 2 (par exemple F)
+    # Trajectoire approchée
     Ki = K_val[i_exp]
-    A, B = [value(Ki, f) for f in F]   # A = X2, B = Y2
-    X2, Y2 = A, B
+
+    X2 = value(Ki, F[0])
+    Y2 = value(Ki, F[1])
+
+    if X2 is False or Y2 is False:
+        print("Fonction mal définie")
+        return
+
+    # Si la fonction est constante
+    if np.isscalar(X2):
+        X2 = np.full(len(T), float(X2))
+    else:
+        X2 = np.asarray(X2, dtype=float)
+
+    if np.isscalar(Y2):
+        Y2 = np.full(len(T), float(Y2))
+    else:
+        Y2 = np.asarray(Y2, dtype=float)
+
+    n_frames = min(len(X1), len(X2), len(Y1), len(Y2))
 
     fig, ax = plt.subplots()
-    ax.set_aspect('equal', adjustable='datalim')
+    ax.set_aspect("equal", adjustable="datalim")
 
-    # Traces statiques
-    ax.plot(X1, Y1, color='gray', alpha=0.4, label="traj 1")
-    ax.plot(X2, Y2, color='lightblue', alpha=0.4, label="traj 2")
+    # Tracés fixes
+    ax.plot(X1, Y1, color="gray", alpha=0.4, label="Trajectoire réelle")
+    ax.plot(X2, Y2, color="tab:blue", alpha=0.4, label="Approximation")
 
     # Points animés
-    p1, = ax.plot([], [], 'ro', markersize=6)   # point rouge
-    p2, = ax.plot([], [], 'bo', markersize=6)   # point bleu
+    p1, = ax.plot([], [], "ro", ms=6)
+    p2, = ax.plot([], [], "bo", ms=6)
 
     def init():
         p1.set_data([], [])
@@ -132,13 +160,9 @@ def trace_anim2(i_exp,F):
         return p1, p2
 
     def update(i):
-        # IMPORTANT : toujours passer des listes
         p1.set_data([X1[i]], [Y1[i]])
         p2.set_data([X2[i]], [Y2[i]])
         return p1, p2
-
-    # Nombre de frames = min des deux longueurs
-    n_frames = min(len(X1), len(X2))
 
     ani = FuncAnimation(
         fig,
@@ -146,34 +170,35 @@ def trace_anim2(i_exp,F):
         frames=n_frames,
         init_func=init,
         interval=40,
-        repeat=False)
+        repeat=False,
+        blit=True,)
 
-    plt.legend()
+    ax.legend()
     plt.show()
 
+    return ani
 
 ## modification génétique
 
 def gauss(x):
     return ma.exp(-(x/n_P)**2)
 
-def mutation(f):
-    if f is None:
-        return cst()
-    mut = rd.choices([add_op,del_op,swap_op,change_cst,swap_child],weights=[1,1,5,5,5])[0]
-    f_mut = mut(f)
-    if valide_expr(f_mut):
-        return f_mut
-    return f
-
-def parcour(f,target_index,i=0):#Si i!∈[0,nb_node_f(f)-1] parcour=None
-    if i == target_index:
+def mutation(f,n_mut):
+    if n_mut==0:
         return f
-    for arg in f.args:
-        i += 1
-        res = parcour(arg,target_index,i)
-        if res is not None:
-            return res
+    else:
+        if f is None:
+            return mutation(cst(),n_mut-1)
+        mut = rd.choices([add_op,del_op,swap_op,change_cst,swap_child],weights=[1,1,5,5,2])[0]
+        f_mut = mut(f)
+        if valide_expr(f_mut) and nb_node(f_mut)<=max_size:
+            return mutation(f_mut,n_mut-1)
+        return mutation(f,n_mut-1)
+
+def parcour(expr, target):
+    nodes = list(sy.preorder_traversal(expr))
+    if target < len(nodes):
+        return nodes[target]
     return None
 
 def valide_expr(expr):
@@ -193,6 +218,8 @@ def add_op(f):
     type = rd.randint(1,2)
     op = rd.choice(OP[type])
     if type==2 :
+        if op==sy.Pow:
+            new = op(abs(expr),abs(cst()))
         new = op(expr,cst())
         return f.subs(expr,new)
     else:
@@ -200,9 +227,9 @@ def add_op(f):
         return f.subs(expr,new)
 
 #cste ∈ [t, paramètres, Réel∈[-range_k,range_k]]
-def cst(old=0):
-    if old != 0:
-        new = old*(1/range_k)#arbitraire
+def cst(old=None):
+    if old is not None:
+        new = old + rd.uniform(-1,1)*(1/range_k)#arbitraire
     else:
         new = sy.Float(rd.uniform(-range_k,range_k))
     new_cst = rd.choice([t,*K_var,new])
@@ -238,7 +265,7 @@ OP = {1:OP_1,2:OP_2}
 
 #nombre d'expression en entré de l'opérateur(ex: +:2, cos:1)
 def type_op(expr):
-    for OP_n,n in [(OP_1,1),(OP_2,1)]:
+    for OP_n,n in [(OP_1,1),(OP_2,2)]:
         for op in OP_n:
             if type(expr) is op:
                 return n
@@ -255,9 +282,10 @@ def del_op(f):
 
 def swap_child(f):
     EXPR = [exp for exp in sy.postorder_traversal(f) if len(exp.args)>=2]
-    if len(EXPR)>=1:
+    if EXPR:
         expr = rd.choice(EXPR)
-        return expr.func(*expr.args[::-1])
+        new = expr.func(*expr.args[::-1])
+        return f.subs(expr, new)
     return f
 
 ## évolution
@@ -278,9 +306,25 @@ def fitness(f,var):
 def ini_P(var):#P = [(F,fit(F), ...]
     ini_P = []
     for _ in range(n_P):
-        f = cst()
+        f = mutation(cst(),5)
         ini_P.append((f,fitness(f,var)))
     return ini_P
+
+#nombre mutation en fonction écart type de la pop
+#lim(ec_ty->0)=max_mut+1, petit écart type -> beaucoup mut
+#lim(ec_ty->inf)=1, grand écart type -> peu mutation
+def nb_mut(rk,ec_typ):
+    return round(max_mut*inverse_1(ec_typ) / (1+ma.exp(-rk+5)) + 1)
+
+def inverse_1(x):
+    return 1/(x+1)
+
+def ecar_type(P):
+    n = len(P)
+    m = sum(p[1] for p in P)/n
+    return ma.sqrt(sum((p[1]-m)**2 for p in P)/n)
+
+
 
 #P[0][0] = F
 #P[0] = (f,fit(f))
@@ -296,11 +340,15 @@ def evolution():
                 print(i,"-ième génération")
                 print(P[0][0],",",P[0][1],"\n")
 
-            W = [gauss(i) for i in range(len(P))]
-            for Pi in rd.choices(P,weights=W,k=baby):
-                F_mut = mutation(Pi[0])
+            e_typ = ecar_type(P[:round(n_P/4)])#écart type du premier quart de la pop
+
+            W = [gauss(j) for j in range(len(P))]
+            for rk in rd.choices([j for j in range(len(P))],weights=W,k=baby):
+                Pi = P[rk]
+                n_mut = nb_mut(rk,e_typ)
+                F_mut = mutation(Pi[0],n_mut)
                 F_mut_fit = fitness(F_mut,var)
-                P = insertion(P,(F_mut,F_mut_fit))
+                P = insertion(P,F_mut,F_mut_fit)
             if i%div==0:
                 P = P[:n_P]
 
@@ -309,11 +357,11 @@ def evolution():
     return F,FIT
 
 #insert un individu en gardant un ordre un ordre croissant (de fitness)
-def insertion(P,f_fit):
+def insertion(P,f,fit):
     k = 0
-    while k<len(P) and f_fit[1]>=P[k][1] : # trouve l'emplacement adapté du nouvel élément et on l'insert
+    while k<len(P) and fit>=P[k][1] : # trouve l'emplacement adapté du nouvel élément et on l'insert
         k+=1
-    return P[:k] + [f_fit] + P[k:]
+    return P[:k] + [(f,fit)] + P[k:]
 
 ## evolution matriciel
 import numpy as np
@@ -321,7 +369,7 @@ import numpy as np
 def ini_M(var):
     M = np.zeros((n_M,n_M),dtype=object)
     for i,j in COORD:
-        M[i][j] = {'f':cst(),'e':[]}
+        M[i][j] = {'f':mutation(cst(),5),'e':[]}
     for i,j in COORD:
         M[i][j]['adj_co'] = ini_voisin_co(M,i,j)#coord des voisins
         M[i][j]['fit'] = fitness(M[i][j]['f'],var)
@@ -351,7 +399,7 @@ def evolution_mat():
             #Pour chaque individu créé des mutations(enfants) de lui même à tout ses voisins
             for i,j in COORD:
                 for i_v,j_v in M[i][j]['adj_co']:
-                    e = mutation(M[i_v][j_v]['f'])
+                    e = mutation(M[i_v][j_v]['f'],1)
                     M[i][j]['e'].append({'f':e,'fit':fitness(e,var)})
             #pour tout individus si son meilleur enfant est meilleur que lui on le remplace
             for i,j in COORD:
@@ -390,16 +438,20 @@ def ecrat_type_M(M):
 ##Paramètres génétiques:
 
 #Paramètres
-eps     = 5
-g_max   = 100
-range_k = 10
-c       = 0.1
+eps         = 5
+g_max       = 300
+range_k     = 10
+c           = 0.1
+max_size    = 30
+max_mut     = 6
 
 #evolution
-n_P     = 300
-div     = 4
+n_P     = 200
+div     = 3
 baby    = 150
 
 #evolution mat
 n_M     = 5
 COORD = [(i,j) for i in range(n_M) for j in range(n_M)]
+
+## data
