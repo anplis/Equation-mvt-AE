@@ -4,6 +4,7 @@ import sympy as sy
 import random as rd
 import copy as copy
 import numpy as np
+from func_timeout import func_timeout, FunctionTimedOut     #timeout
 
 t = sy.symbols('t',real = True)
 
@@ -26,12 +27,11 @@ t = sy.symbols('t',real = True)
 ## modélisation
 
 #liste des valeurs de fonctions pour x valeurs de temps dans X
-def value(Ki, f):
+def value_no_timeout(Ki, f):
     if f is None:
         return False
     try :
         f_num = sy.lambdify((t, *K_var), f, modules="numpy")
-
         with np.errstate(all="ignore"):
             A = f_num(T, *Ki)
 
@@ -43,9 +43,16 @@ def value(Ki, f):
     except Exception:
         return False
 
+def value(Ki,f):#timeout de 1s pour évaluer la fonction
+    try:
+        A = func_timeout(1, value_no_timeout, args=(Ki,f))
+        return A
+    except:
+        return False
+
 # validité d'une fonction sur un l'intervale de temps
 def valide(A):
-    return np.all(np.isfinite(A)) and not np.iscomplexobj(A) and np.max(np.abs(A)) < 1e6
+    return np.all(np.isfinite(A)) and not np.iscomplexobj(A) and np.max(np.abs(A)) < 1e3
 
 # somme des écarts quadratiques aux points d'une trajéctoire
 def ecart(Ci,Ki,f,var):
@@ -307,7 +314,9 @@ def ini_P(var):#P = [(F,fit(F), ...]
     ini_P = []
     for _ in range(n_P):
         f = mutation(cst(),5)
-        ini_P.append((f,fitness(f,var)))
+        fit = fitness(f,var)
+        if fitness!='inf':
+            ini_P.append((f,fit))
     return ini_P
 
 #nombre mutation en fonction écart type de la pop
@@ -320,11 +329,12 @@ def inverse_1(x):
     return 1/(x+1)
 
 def ecar_type(P):
-    n = len(P)
-    m = sum(p[1] for p in P)/n
-    return ma.sqrt(sum((p[1]-m)**2 for p in P)/n)
-
-
+    fits = [p[1] for p in P if np.isfinite(p[1])]
+    if len(fits) == 0:
+        return 1
+    m = sum(fits)/len(fits)
+    var = sum((x - m)**2 for x in fits)/len(fits)
+    return ma.sqrt(var)
 
 #P[0][0] = F
 #P[0] = (f,fit(f))
@@ -348,7 +358,8 @@ def evolution():
                 n_mut = nb_mut(rk,e_typ)
                 F_mut = mutation(Pi[0],n_mut)
                 F_mut_fit = fitness(F_mut,var)
-                P = insertion(P,F_mut,F_mut_fit)
+                if F_mut_fit!='inf':
+                    P = insertion(P,F_mut,F_mut_fit)
             if i%div==0:
                 P = P[:n_P]
 
@@ -434,24 +445,17 @@ def var_M(M,COORD,n_M,pow):
 def ecrat_type_M(M):
     return ma.sqrt(var_M(M))
 
-
 ##Paramètres génétiques:
 
 #Paramètres
 eps         = 5
-g_max       = 300
+g_max       = 200
 range_k     = 10
 c           = 0.1
-max_size    = 30
+max_size    = 25
 max_mut     = 6
 
 #evolution
 n_P     = 200
 div     = 3
 baby    = 150
-
-#evolution mat
-n_M     = 5
-COORD = [(i,j) for i in range(n_M) for j in range(n_M)]
-
-## data
