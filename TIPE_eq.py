@@ -266,9 +266,10 @@ def change_cst(f):
     EXPR = [ex for ex in sy.postorder_traversal(f) if not ex.args]
     return f.subs(rd.choice(EXPR),cst())
 
-OP_1 = [sy.exp,sy.ln,sy.cos,sy.sin,sy.tan,sy.acos,sy.asin,sy.atan]
+OP_1 = [sy.exp,sy.ln,sy.cos,sy.sin,sy.tan]
 OP_2 = [sy.Add,sy.Mul,sy.Pow]
 OP = {1:OP_1,2:OP_2}
+#to much errors with :sy.acos,sy.asin,sy.atan
 
 #nombre d'expression en entré de l'opérateur(ex: +:2, cos:1)
 def type_op(expr):
