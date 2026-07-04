@@ -49,6 +49,7 @@ def value(Ki,f):#timeout de 0.1s pour évaluer la fonction
         A = func_timeout(0.01, value_no_timeout, args=(Ki,f))
         return A
     except:
+        #print('time_out')
         return False
 
 # validité d'une fonction sur un l'intervale de temps
@@ -58,7 +59,9 @@ def valide(A):
 # somme des écarts quadratiques aux points d'une trajéctoire
 def ecart(Ci,Ki,f,var):
     X = np.array([x[var] for x in Ci])#coord x ou y
+    #print('start evalu')
     A = value(Ki,f)
+    #print('evalu finish')
     if A is False:
         return False
     return np.sum((X - A)**2)
@@ -191,17 +194,33 @@ def trace_anim2(i_exp, F):
 def gauss(x):
     return ma.exp(-(x/n_P)**2)
 
-def mutation(f,n_mut):
-    if n_mut==0:
+def mutation(f,n_mut):#timeout de 0.1s pour évaluer la fonction
+    try:
+        f = func_timeout(0.1, mutation_no_timeout, args=(f,n_mut))
         return f
-    else:
+    except:
+        #print('time_out')
+        return cst()
+
+
+def mutation_no_timeout(f,n_mut):
+    i = 0
+    while n_mut>0 and i<30:#max itération
+        i += 1
+        n_mut -= 1
+
         if f is None:
-            return mutation(cst(),n_mut-1)
-        mut = rd.choices([add_op,del_op,swap_op,change_cst,swap_child],weights=[1,1,10,10,3])[0]
+            return cst()
+
+        mut = rd.choices([add_op,del_op,swap_op,change_cst,swap_child],weights=[1,1,10,10,4])[0]
         f_mut = mut(f)
+
         if valide_expr(f_mut) and nb_node(f_mut)<=max_size:
-            return mutation(f_mut,n_mut-1)
-        return mutation(f,n_mut-1)
+            if f==f_mut:
+                n_mut += 1
+            else:
+                f = f_mut
+    return f
 
 def parcour(expr, target):
     nodes = list(sy.preorder_traversal(expr))
@@ -215,7 +234,7 @@ def valide_expr(expr):
             return False
     if expr.has(sy.nan) or expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo):
         return False
-    if sy.im(expr) != 0:
+    if not expr.is_real:
         return False
     return True
 
@@ -227,9 +246,10 @@ def add_op(f):
     type = rd.randint(1,2)
     op = rd.choice(OP[type])
     if type==2 :
+        c = cst()
         if op==sy.Pow:
-            new = op(abs(expr),abs(cst()))
-        new = op(expr,cst())
+            new = op(abs(expr),abs(c))
+        new = op(expr,c)
         return f.subs(expr,new,evaluate=False)
     else:
         new = op(expr,evaluate=False)
@@ -268,10 +288,7 @@ def change_cst(f):
     EXPR = [ex for ex in sy.postorder_traversal(f) if not ex.args]
     if not EXPR:
         return f
-    try:
-        return f.subs(rd.choice(EXPR),cst(),evaluate=False)
-    except Exception:
-        return f
+    return f.subs(rd.choice(EXPR),cst(),evaluate=False)
 
 OP_1 = [sy.exp,sy.ln,sy.cos,sy.sin,sy.tan]
 OP_2 = [sy.Add,sy.Mul,sy.Pow]
@@ -314,7 +331,9 @@ def nb_node(f):
 
 # évaluation d'une approximation
 def fitness(f,var):
+    #print('start ecart')
     ec_tot = ecart_tot(f,var)
+    #print('ecart finish')
     if ec_tot is False:
         return float('inf')
     return ec_tot + c*nb_node(f)
@@ -365,8 +384,12 @@ def evolution():
             for rk in rd.choices([j for j in range(len(P))],weights=W,k=baby):
                 Pi = P[rk]
                 n_mut = nb_mut(rk,e_typ)
+                #print('start muation',i,n_mut)
                 F_mut = mutation(Pi[0],n_mut)
+                #print('finish mutation')
+                #print('start fitness',i)
                 F_mut_fit = fitness(F_mut,var)
+                #print('fitness finish',i)
                 if F_mut_fit!='inf':
                     P = insertion(P,F_mut,F_mut_fit)
             if i%div==0:
@@ -460,13 +483,13 @@ eps         = 5
 g_max       = 500
 range_k     = 10
 c           = 0.3
-max_size    = 20
-max_mut     = 10
+max_size    = 25
+max_mut     = 5
 
 #evolution
 n_P     = 100
-div     = 5
-baby    = 200
+div     = 6
+baby    = 300
 
 #evolution mat
 n_M     = 5
@@ -577,4 +600,4 @@ y0 = sy.symbols('y0',real=True)
 K_var = [L,x0,y0]
 
 #results:
-F = [x0*sy.sin(sy.sin(sy.sin(4.963740378792*t + y0 + 0.1847517814011))), 1.05995729841294*y0
+F = [x0*sy.sin(sy.sin(sy.sin(4.963740378792*t + y0 + 0.1847517814011))), 1.05995729841294*y0]
