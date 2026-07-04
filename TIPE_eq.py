@@ -250,10 +250,10 @@ def add_op(f):
         if op==sy.Pow:
             new = op(abs(expr),abs(c))
         new = op(expr,c)
-        return f.subs(expr,new,evaluate=False)
+        return f.func(expr,new,evaluate=False)
     else:
         new = op(expr,evaluate=False)
-        return f.subs(expr,new,evaluate=False)
+        return f.func(expr,new,evaluate=False)
 
 #cste ∈ [t, paramètres, Réel∈[-range_k,range_k]]
 def cst(old=None):
@@ -276,19 +276,19 @@ def swap_op(f):
     l = rd.choice([1,2])
     op = rd.choice(OP[l])
     if n==l:
-        return f.subs(expr,op(*expr.args),evaluate=False)
+        return f.func(expr,op(*expr.args),evaluate=False)
     elif n==1 and l>=2:
         new = [cst() for _ in range(l-n)]
-        return f.subs(expr,op(*expr.args,*new),evaluate=False)
+        return f.func(expr,op(*expr.args,*new),evaluate=False)
     elif n==2 and l == 1:
-        return f.subs(expr,op(rd.choice(expr.args)),evaluate=False)
+        return f.func(expr,op(rd.choice(expr.args)),evaluate=False)
 
 #modifie valeur d'une constante aléatoirement choisie
 def change_cst(f):
     EXPR = [ex for ex in sy.postorder_traversal(f) if not ex.args]
     if not EXPR:
         return f
-    return f.subs(rd.choice(EXPR),cst(),evaluate=False)
+    return f.func(rd.choice(EXPR),cst(),evaluate=False)
 
 OP_1 = [sy.exp,sy.ln,sy.cos,sy.sin,sy.tan]
 OP_2 = [sy.Add,sy.Mul,sy.Pow]
@@ -310,7 +310,7 @@ def del_op(f):
     if expr==None:
         return f
     if len(expr.args)>1:
-        return f.subs(expr,rd.choice(expr.args),evaluate=False)
+        return f.func(expr,rd.choice(expr.args),evaluate=False)
     return f
 
 def swap_child(f):
@@ -318,7 +318,7 @@ def swap_child(f):
     if EXPR:
         expr = rd.choice(EXPR)
         new = expr.func(*expr.args[::-1])
-        return f.subs(expr, new,evaluate=False)
+        return f.func(expr, new,evaluate=False)
     return f
 
 ## évolution
@@ -484,7 +484,7 @@ g_max       = 500
 range_k     = 10
 c           = 0.3
 max_size    = 25
-max_mut     = 5
+max_mut     = 3
 
 #evolution
 n_P     = 100
