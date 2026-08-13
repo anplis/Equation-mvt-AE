@@ -15,16 +15,31 @@ eps = 100
 
 # evaluation function
 def eval(f):
-    # Évalue la fonction f sur un intervalle de temps donné
     try:
         f_eval = []
         for i in range(len(K_val)):
             K_val_i = K_val[i]*len(T)
-            f_eval_i = func_timeout(1, lambda: [f.subs({t: t_val, **{var: val for var, val in zip(K_var, K_val_i)}}).evalf() for t_val in T]) # Timeout de 1 seconde pour l'évaluation
+            def compute():
+                vals = []
+                for t_val in T:
+                    expr = f.subs({t: t_val, **{var: val for var, val in zip(K_var, K_val_i)}})
+                    # Sécurité : si l'expression contient zoo, oo, -oo, nan → on arrête
+                    if expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo) or expr.has(sy.nan):
+                        return False
+                    val = expr.evalf()
+                    # Si evalf retourne ComplexInfinity → on arrête
+                    if val.is_infinite:
+                        return False
+                    vals.append(val)
+                return vals
+            f_eval_i = func_timeout(1, compute)
+            if f_eval_i is False:
+                return False
             f_eval.append(f_eval_i)
         return f_eval
     except FunctionTimedOut:
-        return False  # Retourne une valeur infinie si le calcul prend trop de temps
+        return False
+
 
 def ecart(f,i_var):
     # Calcule l'écart au carré entre la fonction f et les données expérimentales
