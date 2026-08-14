@@ -9,11 +9,15 @@ t = sy.symbols('t')
 # contantes
 max_memory = 1000
 max_gen = 100
-n_voisin = 5
-select = 50
+n_voisin = 10
+select = 10
 eps = 100
 
-# evaluation function
+
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+#                       EVALUATION                          #
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+
 def eval(f):
     try:
         f_eval = []
@@ -40,7 +44,6 @@ def eval(f):
     except FunctionTimedOut:
         return False
 
-
 def ecart(f,i_var):
     # Calcule l'écart au carré entre la fonction f et les données expérimentales
     f_eval = eval(f)
@@ -53,26 +56,20 @@ def ecart(f,i_var):
         ecart_total += ecart_i
     return ecart_total
 
-def new_valid_f():
-    # Génère une fonction aléatoire définie pour tout réel
-    c1 = rd_cst()
-    c2 = rd_cst()
-    if rd.random() < 0.5:
-        op1 = rd.choice([sy.cos, sy.sin, sy.tan])
-        return rd.choice([sy.Add, sy.Mul])(c1, op1(c2))
-    else:
-        return rd.choice([sy.Add, sy.Mul])(c1, c2)
+
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+#                       MUTATION                            #
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
 def rd_cst():#rd cst
     return rd.choice([t,*K_var,sy.Float(rd.uniform(-10, 10))])
 
-#   mutation functions
 
 def mutation(f, n):
     for _ in range(n):
         try:
             # Applique une mutation à la fonction f
-            mut = rd.choices([opti_cst, change_node, del_op, swap_child, extract], weights=[1, 0.5, 0.3, 0.5, 0.2])[0]
+            mut = rd.choices([opti_cst, change_node, del_op, swap_child, extract], weights=[1, 1, 0.3, 0.5, 0.2])[0]
             f = func_timeout(1, lambda: mut(f))  # Timeout de 1 seconde pour la mutation
         except FunctionTimedOut:
             return f  # Retourne la fonction originale si la mutation prend trop de temps
@@ -95,7 +92,7 @@ OP = {1 : OP_1, 2  :OP_2}
 
 def change_node(f):
     # Change un nœud de la fonction f
-    nodes = list(f.atoms())
+    nodes = list(sy.preorder_traversal(f))
     if not nodes:
         return rd_cst()
     
@@ -155,6 +152,19 @@ def validate_function(f):
         return False
     return True
 
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+#                       MAIN                                #
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+
+def new_valid_f():
+    # Génère une fonction aléatoire définie pour tout réel
+    c1 = rd_cst()
+    c2 = rd_cst()
+    if rd.random() < 0.5:
+        op1 = rd.choice([sy.cos, sy.sin, sy.tan])
+        return rd.choice([sy.Add, sy.Mul])(c1, op1(c2))
+    else:
+        return rd.choice([sy.Add, sy.Mul])(c1, c2)
 
 def add_memory(memory, f):
     # Ajoute la fonction f à la mémoire si elle n'y est pas déjà
@@ -225,7 +235,9 @@ def evolution():
     print(F)
     return trace(F)
 
-# graph :
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+#                       GRAPH                               #
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
 def plot(f,i_var):
     # Trace la fonction f et les données expérimentales
@@ -293,7 +305,9 @@ def trace(F):
     plt.grid()
     plt.show()
 
-#   data :
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
+#                       DATA                                #
+#---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
 K_val = [(10, 0.602),(20, 0.586),(30,0.492),(40,0.511)]
 C1 = [
@@ -395,5 +409,3 @@ C = [C1,C2,C3,C4]
 l = sy.symbols('l',real=True)
 teta0 = sy.symbols('teta0',real=True)
 K_var = [l,teta0]
-
-evolution()
