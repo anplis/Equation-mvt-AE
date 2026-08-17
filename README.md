@@ -21,24 +21,4 @@ Protocole :
 	- Intégrer les données dans l’algorithme et entraîner le modèle jusqu’à avoir un écart inférieur à un certain ε.
 	-  Observer l’écart a l’équation théorique du mouvement(si on la) avec des paramétrés différents de ceux des expériences. 
 
-(M, T, ∆t identiques pour chaque expériences)
-
-
-Algorithme évolutif :
-principe :
-reproduction du principe de l’évolution selon Darwin 
-
-boucle d’évolution :
-- population initiale
-	- évaluation de la population
-	- sélections 
-	- création nouvelle population par mutation des sélectionnés
-
-Appropriation :
-Individu = 2 fonctions (pour x et y) de t qui tente d’approcher la trajectoire réelle.
-Évaluation =  fonction nommée ‘fitness’ qui attribue un une valeur à chaque individu sur son aptitude à répondre au problème et permet de les classer, celle-ci comptant l’écart à la trajectoire et la complexité de ses fonctions.
-Sélection = on garde qu’un certain nombre d’individus parmi les mieux classés (selon la fonction fitness) de notre population population.
-Mutation = modification(s) aléatoire(s) des fonctions des individus sélectionnés, (d’amplitude proportionnelle au rang de l’individu).
-
-mise en œuvre :
 Utilisation de la bibliothèque « Sympy » pour modéliser et modifier des fonctions mathématiques. 
