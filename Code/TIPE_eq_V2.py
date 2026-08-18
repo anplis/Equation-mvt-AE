@@ -10,8 +10,8 @@ max_memory = 1000
 max_gen = 100
 max_size = 30
 max_compute = 0.5 # durée maximal(s) qu'une fonction peut prendre pour être évaluer(calculer l'écart)
-n_voisin_S = 15
-n_voisin_N = 15
+n_voisin_S = 10
+n_voisin_N = 10
 select = 20
 w_node = 0.02   # coef malus du nombre de noeuds de la fonction
 w_cst = 5       # coef malus si la fonction est constante
@@ -97,8 +97,11 @@ def change_cst(f):  # Modifie aléatoirement les cst(numériques) d'une fonction
         new_c = sy.Float(rd.uniform(-10, 10))
     return f.xreplace({c : new_c})
 
-OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt]
-OP_2 = [sy.Add, sy.Mul, sy.Pow]#Create new op : Div
+def Div(x, y):
+    return x/y
+
+OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt, sy.exp, sy.log]
+OP_2 = [sy.Add, sy.Mul, sy.Pow, Div]
 OP = {1 : OP_1, 2  :OP_2}
 
 def change_node(f):
@@ -138,7 +141,6 @@ def extract(f):
         return rd.choices(nodes, weights=[1/(i+1) for i in range(len(nodes))])[0]
     else:
         return f
-
 
 def validate_function(f):
     # Vérifie si la fonction f est valide (pas de division par zéro, pas de logarithme négatif, etc.)
