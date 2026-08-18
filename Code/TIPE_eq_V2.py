@@ -22,31 +22,36 @@ eps = 0.1
 #                       EVALUATION                          #
 #---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
+def compute(f, K_val_i):
+    vals = []
+    dict = {var: val for var, val in zip(K_var, K_val_i)}
+    for t_val in T:
+        expr = f.subs({t: t_val, **dict})
+        if expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo) or expr.has(sy.nan):
+            return False
+        val = expr.evalf()
+        if val.is_infinite or not val.is_real:
+            return False
+        vals.append(val)
+    return vals
+
 def eval(f):
-    try:
-        f_eval = []
-        for i in range(len(K_val)):
-            K_val_i = K_val[i]
-            def compute():
-                vals = []
-                dict = {var: val for var, val in zip(K_var, K_val_i)}
-                for t_val in T:
-                    expr = f.subs({t: t_val, **dict})
-                    # Sécurité : si l'expression contient zoo, oo, -oo, nan → on arrête
-                    if expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo) or expr.has(sy.nan):
-                        return False
-                    val = expr.evalf()
-                    if val.is_infinite or not val.is_real:
-                        return False
-                    vals.append(val)
-                return vals
-            f_eval_i = func_timeout(max_compute, compute)
-            if f_eval_i is False:
-                return False
-            f_eval.append(f_eval_i)
-        return f_eval
-    except FunctionTimedOut:
-        return False
+    f_eval = []
+    for i in range(len(K_val)):
+        
+        try:
+            f_eval_i = func_timeout(max_compute, compute, args = (f, K_val[i]))
+        except FunctionTimedOut:
+            return False
+
+        if f_eval_i is False:
+            return False
+
+        f_eval.append(f_eval_i)
+
+    return f_eval
+
+
 
 def ecart(f,i_var):
     # Calcule l'écart au carré entre la fonction f et les données expérimentales
@@ -56,7 +61,7 @@ def ecart(f,i_var):
     ecart_total, L_ec = 0, []
     for i in range(len(C)):
         C_i = C[i]
-        ecart_i = sum((f_eval[i][j] - C_i[j][i_var])**2 for j in range(len(T)))
+        ecart_i = sum(((f_eval[i][j] - C_i[j][i_var])**2) for j in range(len(T)))
         L_ec.append(ecart_i)
         ecart_total += ecart_i
     return (ecart_total, ec_type(L_ec))
@@ -72,20 +77,22 @@ def rd_cst():#rd cst
         c = -c
     return c
 
-def mutation(f, memory, max_try = 20):
-    i = 0
+def mutation(f, memory, n_mut, max_try = 20):
     new_f = f
-    while i<max_try and (new_f == f or stucture(new_f) in memory) :
-        try:
-            # Applique une mutation à la fonction f
-            mut = rd.choices([change_node, del_op, extract], weights=[1, 0.8, 0.3])[0]
-            new_f = func_timeout(1, lambda: mut(f))  # Timeout de 1 seconde pour la mutation
-        except FunctionTimedOut:
-            print('mutation a pris trop temps')
-            return None  # Retourne None si la mutation prend trop de temps
-        i += 1
-    if i == max_try:
-        return None
+    for _ in range(n_mut):
+        i = 0
+        while i<max_try and (new_f == f or stucture(new_f) in memory) :
+            try:
+                # Applique une mutation à la fonction f
+                mut = rd.choices([change_node, del_op, extract], weights=[1, 0.8, 0.3])[0]
+                new_f = func_timeout(1, lambda: mut(f))  # Timeout de 1 seconde pour la mutation
+            except FunctionTimedOut:
+                print('mutation a pris trop temps')
+                return None  # Retourne None si la mutation prend trop de temps
+            i += 1
+        if i == max_try:
+            return None
+        f = new_f
     return new_f
 
 def change_cst(f):  # Modifie aléatoirement les cst(numériques) d'une fonction
@@ -101,7 +108,7 @@ def Div(x, y):
     return x/y
 
 OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt, sy.exp, sy.log]
-OP_2 = [sy.Add, sy.Mul, Div]# no pow : to much time for eval
+OP_2 = [sy.Add, sy.Mul, Div, sy.Pow]
 OP = {1 : OP_1, 2  :OP_2}
 
 def change_node(f):
@@ -201,25 +208,30 @@ def stucture(f):    #   renvoie une fonction sans nombres par remplacement des n
         f_bis = f_bis.xreplace({cst : Nb})
     return f_bis
 
+def insert_ini_f(population, memory, i_var, n):
+    while len(population)<n :  # Continue jusqu'à ce que la population atteigne la taille souhaitée
+            new_f = ini_f()
+            while stucture(new_f) in memory:
+                new_f = ini_f()  # Génère une nouvelle fonction aléatoire
+                
+            if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
+                fit = fitness(new_f, i_var)
+                if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
+                    memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
+                    population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée
+    return population
 
 def evolution_one_var(i_var):
     
     # Initialisation de la population
     memory,population = [],[]  # Mémoire pour stocker les individus déjà évalués, population pour stocker les individus triés par écart
-    while len(population)<n_voisin_S :  # Continue jusqu'à ce que la population atteigne la taille souhaitée
-        new_f = ini_f()
-        while stucture(new_f) in memory:
-            new_f = ini_f()  # Génère une nouvelle fonction aléatoire
-            
-        if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
-            fit = fitness(new_f, i_var)
-            if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
-                memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
-                population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée
-        
+    population = insert_ini_f(population, memory, i_var, n_voisin_S)  
+
     print("start evolution")
     # Boucle d'évolution
-    gen = 0  # Compteur de générations
+    gen = 0     # Compteur de générations
+    n_mut = 1   # Nombre de mutation appliquées
+    best_f_10 = population[0][0]
     a = time.time()
     while gen<max_gen and ecart(population[0][0],i_var)[0]>eps:  # Continue tant que le nombre de générations est inférieur à max_gen et que l'écart du meilleur individu est supérieur à eps
         Parents = rd.choices(population, weights=[1/(i+1) for i in range(len(population))], k=min(select, len(population)))  # Sélectionne des individu avec une probabilité décroissante
@@ -230,7 +242,7 @@ def evolution_one_var(i_var):
             
             # - Structurels
             for _ in range(n_voisin_S):
-                new_f = mutation(p_f, memory)
+                new_f = mutation(p_f, memory, n_mut)
                 if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
                     new_fit = fitness(new_f, i_var)
                     if isinstance(new_fit, (int, sy.Float)) and abs(new_fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
@@ -258,6 +270,12 @@ def evolution_one_var(i_var):
             population = population[:max_memory]    # Limite la taille de la population et memory
             memory = memory[max_memory:]    # Enlève les plus anciens
             print(f"Generation {gen} : Durée {time.time()-a} : Best function : {population[0][0]}, Fitness : {population[0][1]}")
+            if best_f_10 == population[0][0]:   # Si stagnation du meilleur individu
+                n_mut += 1
+                population = insert_ini_f(population, memory, i_var, 10)    # Ajoute 10 individus aléatoires
+            else:
+                n_mut = 1
+            best_f_10 = population[0][0]
             a = time.time()
             
     return population[0]  # Retourne le meilleur individu après l'évolution
@@ -430,21 +448,25 @@ def trace_anim_F_all_loop(F):
 #                       DATA                                #
 #---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
-K_val = [(1,0.35),(0.7,0.31),(0.6,0.31)]
-T = [0.0, 0.1339556, 0.2678111, 0.4017222, 0.5356333, 0.6695444, 0.8034556, 0.9374778, 1.071389, 1.2053, 1.339211, 1.473233, 1.607144, 1.741056, 1.874967, 2.008878, 2.142922, 2.276878]
-C1 = [(0.3354059, -0.9193614), (0.2980415, -0.9314253), (0.2059416, -0.958923), (0.08786583, -0.9746665), (-0.04630045, -0.9808834), (-0.1801937, -0.9642491), (-0.2728376, -0.9413672), (-0.3141366, -0.928531), (-0.3035328, -0.9335538), (-0.2354452, -0.9530872), (-0.1205178, -0.9724283), (0.01319871, -0.979944), (0.1468501, -0.9675977), (0.2562368, -0.9435996), (0.3204178, -0.9218338), (0.3343702, -0.9162529), (0.2964197, -0.9324377), (0.2121473, -0.9553196)]
-C2 = [(0.2136436, -0.6739894), (0.1707408, -0.6871742), (0.0849351, -0.7032889), (-0.02054311, -0.7083117), (-0.12058, -0.6965919), (-0.1839925, -0.6819421), (-0.2049207, -0.6760822), (-0.1741562, -0.6846628), (-0.1017446, -0.7009868), (-0.000661304, -0.7091488), (0.1012591, -0.7028704), (0.1791121, -0.6859185), (0.2165736, -0.674408), (0.2052724, -0.6779658), (0.1504404, -0.6951269), (0.05730986, -0.7064282), (-0.04774979, -0.7093581), (-0.1385783, -0.6944991)]
-C = [C1,C2]
-
 teta0 = sy.symbols('teta0',real=True)
 l = sy.symbols('l',real=True)
 
-K_var = [l, teta0]
 
-F_sol = [l*sy.sin(teta0*sy.cos(sy.sqrt(9.81/l)*t)),-l*sy.cos(teta0*sy.cos(sy.sqrt(9.81/l)*t))]
+import math as ma
+K_val = [(1,10),(2,5)]
+K_var = [l,teta0]
 
-F = [-3.9694161982783*l*t**3.50962096985163*teta0**(2.35056172238742*t)*sy.sin(2.20144670841537*t), sy.cos(l*teta0*sy.cos(sy.cos(t)) + 3.11672333543347*l)]
+def f_data(t,x,y):
+    return t + ma.sin(2*t + x) + y
+
+def g_data(t,x,y):
+    return t + x + y
+T=[]
+to = 0
+for _ in range(50):
+    T.append(to)
+    to += 0.5
+
+C = [[(f_data(to,x,y),g_data(to,x,y)) for to in T] for x,y in K_val]
 
 evolution()
-
-
