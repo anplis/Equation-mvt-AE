@@ -259,8 +259,6 @@ def evolution_one_var(i_var):
             memory = memory[max_memory:]    # Enlève les plus anciens
             print(f"Generation {gen} : Durée {time.time()-a} : Best function : {population[0][0]}, Fitness : {population[0][1]}")
             a = time.time()
-            for i in range(20):
-                print(population[i][0])
             
     return population[0]  # Retourne le meilleur individu après l'évolution
 
