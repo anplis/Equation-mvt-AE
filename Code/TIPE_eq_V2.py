@@ -4,16 +4,16 @@ import random as rd
 from func_timeout import func_timeout, FunctionTimedOut 
 import time as time
 
-t = sy.symbols('t')
+t = sy.symbols('t', real = True, nonnegative = True)
 
 max_memory = 1000
 max_gen = 100
 max_size = 30
 max_compute = 0.5 # durée maximal(s) qu'une fonction peut prendre pour être évaluer(calculer l'écart)
-n_voisin_S = 10
-n_voisin_N = 10
+n_voisin_S = 15
+n_voisin_N = 15
 select = 20
-w_node = 0.01   # coef malus du nombre de noeuds de la fonction
+w_node = 0.02   # coef malus du nombre de noeuds de la fonction
 w_cst = 5       # coef malus si la fonction est constante
 eps = 0.1
 
@@ -26,11 +26,12 @@ def eval(f):
     try:
         f_eval = []
         for i in range(len(K_val)):
-            K_val_i = K_val[i]*len(T)
+            K_val_i = K_val[i]
             def compute():
                 vals = []
+                dict = {var: val for var, val in zip(K_var, K_val_i)}
                 for t_val in T:
-                    expr = f.subs({t: t_val, **{var: val for var, val in zip(K_var, K_val_i)}})
+                    expr = f.subs({t: t_val, **dict})
                     # Sécurité : si l'expression contient zoo, oo, -oo, nan → on arrête
                     if expr.has(sy.zoo) or expr.has(sy.oo) or expr.has(-sy.oo) or expr.has(sy.nan):
                         return False
@@ -44,7 +45,7 @@ def eval(f):
                 return False
             f_eval.append(f_eval_i)
         return f_eval
-    except FunctionTimedOut:
+    except Exception:
         return False
 
 def ecart(f,i_var):
@@ -55,7 +56,7 @@ def ecart(f,i_var):
     ecart_total, L_ec = 0, []
     for i in range(len(C)):
         C_i = C[i]
-        ecart_i = sum((f_eval[i][j] - C_i[j][i_var])**2 for j in range(len(T)))
+        ecart_i = sum(abs((f_eval[i][j] - C_i[j][i_var])) for j in range(len(T)))
         L_ec.append(ecart_i)
         ecart_total += ecart_i
     return (ecart_total, ec_type(L_ec))
@@ -66,7 +67,10 @@ def ecart(f,i_var):
 #---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 
 def rd_cst():#rd cst
-    return rd.choice([t,*K_var,sy.Float(rd.uniform(-10, 10))])
+    c = rd.choice([t,*K_var,sy.Float(rd.uniform(0, 10))])
+    if rd.random()>0.5:
+        c = -c
+    return c
 
 def mutation(f, memory, max_try = 20):
     i = 0
@@ -87,11 +91,14 @@ def mutation(f, memory, max_try = 20):
 def change_cst(f):  # Modifie aléatoirement les cst(numériques) d'une fonction
     CSTES = list(f.atoms(sy.Float, sy.Integer))
     c = rd.choice(CSTES)
-    new_c = sy.Float(c*(1 + rd.uniform(-1, 1)))  # Ajuste la constante aléatoirement
+    if c != 0:
+        new_c = sy.Float(c*(1 + rd.uniform(-1, 1)))  # Ajuste la constante aléatoirement
+    else:
+        new_c = sy.Float(rd.uniform(-10, 10))
     return f.xreplace({c : new_c})
 
-OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs]
-OP_2 = [sy.Add, sy.Mul]
+OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt]
+OP_2 = [sy.Add, sy.Mul, sy.Pow]#Create new op : Div
 OP = {1 : OP_1, 2  :OP_2}
 
 def change_node(f):
@@ -169,7 +176,7 @@ def moy(L):
 
 def ec_type(L):
     L_2 = [l**2 for l in L]
-    return (moy(L_2)-moy(L)**2)**(1/2)
+    return (max(0, moy(L_2) - moy(L)**2))**(1/2)    #   max(0,...) -> évite les nombres complexes
 
 def fitness(f,i_var):
     ec,ec_typ = ecart(f, i_var)  # Calcule l'écart et l'écart type de la nouvelle fonction
@@ -200,10 +207,10 @@ def fit_insert(new_f, population, i_var, memory, old_f_fit = None):
             memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
         
         if old_f_fit != None :   # Pour les mutations numérique
-            if fit < old_f_fit[1] and old_f_fit in population:  # si f est meilleur que son parent on supprime celui-ci (pour éviter d'avoir des mêmes structures dans la population)
-                population.remove(old_f_fit)
-            else:# si f est pire que son parent on ne le prend pas en compte
+            if fit >= old_f_fit[1]: # Si f est pire que son parent on ne l'ajoute pas à la population
                 return population
+            elif old_f_fit in population:   # Si f est meilleur que son parent on supprime celui-ci (pour éviter d'avoir des mêmes structures dans la population)
+                population.remove(old_f_fit)
             
         if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
             population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée 
@@ -221,7 +228,7 @@ def evolution_one_var(i_var):
     # Boucle d'évolution
     gen = 0  # Compteur de générations
     a = time.time()
-    while gen<max_gen and ecart(population[0][1],i_var)[0]>eps:  # Continue tant que le nombre de générations est inférieur à max_gen et que l'écart du meilleur individu est supérieur à eps
+    while gen<max_gen and ecart(population[0][0],i_var)[0]>eps:  # Continue tant que le nombre de générations est inférieur à max_gen et que l'écart du meilleur individu est supérieur à eps
         f_fits = rd.choices(population, weights=[1/(i+1) for i in range(len(population))], k=min(select, len(population)))  # Sélectionne des individu avec une probabilité décroissante
         
         for f_fit in f_fits:
@@ -414,7 +421,6 @@ def trace_anim_F_all_loop(F):
 
     return ani
 
-
 #---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
 #                       DATA                                #
 #---#---#---#---#---#---#---#---#---#---#---#---#---#---#---#
@@ -432,8 +438,8 @@ K_var = [l, teta0]
 
 F_sol = [l*sy.sin(teta0*sy.cos(sy.sqrt(9.81/l)*t)),-l*sy.cos(teta0*sy.cos(sy.sqrt(9.81/l)*t))]
 
-F = [(t*teta0)**5.03777002541506, l*teta0*(sy.sin(t) - 3.55200841525158)]
-
-F = [-0.209479169543627*sy.sin(3.49129263616927*sy.cos(t))*l, teta0*(0.064042431187835*t - 3.39002876658668)*sy.sin(l)]
+F = [-3.9694161982783*l*t**3.50962096985163*teta0**(2.35056172238742*t)*sy.sin(2.20144670841537*t), sy.cos(l*teta0*sy.cos(sy.cos(t)) + 3.11672333543347*l)]
 
 evolution()
+
+
