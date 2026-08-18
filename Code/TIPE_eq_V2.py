@@ -8,11 +8,11 @@ t = sy.symbols('t', real = True, nonnegative = True)
 
 max_memory = 1000
 max_gen = 100
-max_size = 30
+max_size = 20
 max_compute = 0.5 # durée maximal(s) qu'une fonction peut prendre pour être évaluer(calculer l'écart)
-n_voisin_S = 10
-n_voisin_N = 10
-select = 20
+n_voisin_S = 6
+n_voisin_N = 6
+select = 10
 w_node = 0.02   # coef malus du nombre de noeuds de la fonction
 w_cst = 5       # coef malus si la fonction est constante
 eps = 0.1
@@ -101,7 +101,7 @@ def Div(x, y):
     return x/y
 
 OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt, sy.exp, sy.log]
-OP_2 = [sy.Add, sy.Mul, sy.Pow, Div]
+OP_2 = [sy.Add, sy.Mul, Div]# no pow : to much time for eval
 OP = {1 : OP_1, 2  :OP_2}
 
 def change_node(f):
@@ -201,31 +201,22 @@ def stucture(f):    #   renvoie une fonction sans nombres par remplacement des n
         f_bis = f_bis.xreplace({cst : Nb})
     return f_bis
 
-def fit_insert(new_f, population, i_var, memory, old_f_fit = None):
-    if validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
-        fit = fitness(new_f, i_var)
-        
-        if memory != None:  # Pour les mutations structurel
-            memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
-        
-        if old_f_fit != None :   # Pour les mutations numérique
-            if fit >= old_f_fit[1]: # Si f est pire que son parent on ne l'ajoute pas à la population
-                return population
-            elif old_f_fit in population:   # Si f est meilleur que son parent on supprime celui-ci (pour éviter d'avoir des mêmes structures dans la population)
-                population.remove(old_f_fit)
-            
-        if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
-            population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée 
-    return population
 
 def evolution_one_var(i_var):
+    
     # Initialisation de la population
     memory,population = [],[]  # Mémoire pour stocker les individus déjà évalués, population pour stocker les individus triés par écart
     while len(population)<n_voisin_S :  # Continue jusqu'à ce que la population atteigne la taille souhaitée
-        f = ini_f()
-        while stucture(f) in memory:
-            f = ini_f()  # Génère une nouvelle fonction aléatoire
-        population = fit_insert(f, population, i_var, memory)
+        new_f = ini_f()
+        while stucture(new_f) in memory:
+            new_f = ini_f()  # Génère une nouvelle fonction aléatoire
+            
+        if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
+            fit = fitness(new_f, i_var)
+            if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
+                memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
+                population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée
+        
     print("start evolution")
     # Boucle d'évolution
     gen = 0  # Compteur de générations
@@ -234,21 +225,33 @@ def evolution_one_var(i_var):
         f_fits = rd.choices(population, weights=[1/(i+1) for i in range(len(population))], k=min(select, len(population)))  # Sélectionne des individu avec une probabilité décroissante
         
         for f_fit in f_fits:
-            f = f_fit[0]
+            f, fit = f_fit
             # Génération par mutation de nouveaux individus :
             
             # - Structurels
             for _ in range(n_voisin_S):
                 new_f = mutation(f, memory)
-                if new_f == None:
-                    continue
-                population = fit_insert(new_f, population, i_var, memory)
+                if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
+                    fit = fitness(new_f, i_var)
+                    if isinstance(fit, (int, sy.Float)) and abs(fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
+                        memory.append(stucture(new_f))  #  Rajout de la nouvelle structure à la mémoire
+                        population = insert_sorted(population, (new_f, fit))  # Insère la nouvelle fonction dans la population triée 
                     
             # - numériques
+            New_f = []
             for _ in range(n_voisin_N):
                 if list(f.atoms(sy.Float, sy.Integer)): # Si la fonction a des cst(s) numérique(s)
                     new_f = change_cst(f)
-                    population = fit_insert(new_f, population, i_var, None, f_fit)
+                    if validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
+                            new_fit = fitness(new_f, i_var)
+                            if isinstance(new_fit, (int, sy.Float)) and abs(new_fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
+                                New_f.append((new_f,new_fit))
+            if New_f:
+                best_f = max(New_f, key = lambda i : i[1])
+                if best_f[1] < fit:   # Si f est meilleur que son parent 
+                    population = insert_sorted(population, best_f)  # Insère la nouvelle fonction dans la population triée
+                    if f_fit in population: #   supprime celui-ci (pour éviter d'avoir des mêmes structures dans la population)
+                        population.remove(f_fit)
         
         gen += 1  # Incrémente le compteur de générations
         if gen % 10 == 0:  # Affiche l'état de la population tous les 10 générations
@@ -256,6 +259,8 @@ def evolution_one_var(i_var):
             memory = memory[:max_memory]
             print(f"Generation {gen} : Durée {time.time()-a} : Best function : {population[0][0]}, Fitness : {population[0][1]}")
             a = time.time()
+            for i in range(20):
+                print(population[i][0])
             
     return population[0]  # Retourne le meilleur individu après l'évolution
 
