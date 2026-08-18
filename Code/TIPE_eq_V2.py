@@ -56,7 +56,7 @@ def ecart(f,i_var):
     ecart_total, L_ec = 0, []
     for i in range(len(C)):
         C_i = C[i]
-        ecart_i = sum(abs((f_eval[i][j] - C_i[j][i_var])) for j in range(len(T)))
+        ecart_i = sum((f_eval[i][j] - C_i[j][i_var])**2 for j in range(len(T)))
         L_ec.append(ecart_i)
         ecart_total += ecart_i
     return (ecart_total, ec_type(L_ec))
