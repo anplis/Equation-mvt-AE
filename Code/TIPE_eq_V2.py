@@ -45,7 +45,7 @@ def eval(f):
                 return False
             f_eval.append(f_eval_i)
         return f_eval
-    except Exception:
+    except FunctionTimedOut:
         return False
 
 def ecart(f,i_var):
