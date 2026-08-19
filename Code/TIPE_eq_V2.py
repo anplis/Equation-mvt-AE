@@ -7,14 +7,14 @@ import time as time
 t = sy.symbols('t', real = True, nonnegative = True)
 
 max_memory = 1000
-max_gen = 100
+max_gen = 500
 max_size = 20
 max_compute = 0.5 # durée maximal(s) qu'une fonction peut prendre pour être évaluer(calculer l'écart)
-n_voisin_S = 6
-n_voisin_N = 6
-select = 10
-w_node = 0.02   # coef malus du nombre de noeuds de la fonction
-w_cst = 5       # coef malus si la fonction est constante
+n_voisin_S = 10
+n_voisin_N = 10
+select = 20
+w_node = 0.1   # coef malus du nombre de noeuds de la fonction
+w_cst = 10       # coef malus si la fonction est constante
 eps = 0.1
 
 
@@ -41,7 +41,7 @@ def eval(f):
         
         try:
             f_eval_i = func_timeout(max_compute, compute, args = (f, K_val[i]))
-        except FunctionTimedOut:
+        except :
             return False
 
         if f_eval_i is False:
@@ -77,7 +77,7 @@ def rd_cst():#rd cst
         c = -c
     return c
 
-def mutation(f, memory, n_mut, max_try = 20):
+def mutation(f, memory, n_mut, gen, max_try = 20):
     new_f = f
     for _ in range(n_mut):
         i = 0
@@ -85,7 +85,7 @@ def mutation(f, memory, n_mut, max_try = 20):
             try:
                 # Applique une mutation à la fonction f
                 mut = rd.choices([change_node, del_op, extract], weights=[1, 0.8, 0.3])[0]
-                new_f = func_timeout(1, lambda: mut(f))  # Timeout de 1 seconde pour la mutation
+                new_f = func_timeout(1, lambda: mut(f, gen))  # Timeout de 1 seconde pour la mutation
             except FunctionTimedOut:
                 print('mutation a pris trop temps')
                 return None  # Retourne None si la mutation prend trop de temps
@@ -111,13 +111,16 @@ OP_1 = [sy.cos, sy.sin, sy.tan, sy.Abs, sy.sqrt, sy.exp, sy.log]
 OP_2 = [sy.Add, sy.Mul, Div, sy.Pow]
 OP = {1 : OP_1, 2  :OP_2}
 
-def change_node(f):
+def th(x, gen):
+    return ma.tanh((gen/max_gen - 0.5)*x) + 1
+
+def change_node(f, gen):
     # Change un nœud de la fonction f
     nodes = sorted(list(sy.preorder_traversal(f)), key = lambda x: count_nodes(x), reverse=True)
     if not nodes:
         return rd_cst()
     
-    node = rd.choices(nodes, weights=[1/(i+1) for i in range(len(nodes))])[0]
+    node = rd.choices(nodes, weights=[th(i, gen) for i in range(len(nodes))])[0]
     n_arg = rd.choices([0, 1, 2],weights=[1,1,1])[0]  #nb of args of the new node
     if n_arg == 0:
         new_cst = rd_cst()
@@ -132,7 +135,7 @@ def change_node(f):
     new_args = rd.sample(list(node.args), min(n_arg, len(node.args))) + [rd_cst() for _ in range(new_arg_needed)]
     return f.xreplace({node : new_op(*new_args)})
 
-def del_op(f):
+def del_op(f, gen):
     # Supprime un opérateur de la fonction f
     ops = [expr for expr in sy.preorder_traversal(f) if len(expr.args)>=1]
     if not ops :
@@ -141,7 +144,7 @@ def del_op(f):
     op_arg = rd.choice(op.args)
     return f.xreplace({op : op_arg})
 
-def extract(f):
+def extract(f, gen):
     # Extrait un sous-arbre de la fonction f
     nodes = sorted(list(sy.preorder_traversal(f)), key = lambda x: count_nodes(x), reverse=True)[1:]#pas interet d'extraire la f elle même
     if nodes:
@@ -242,7 +245,7 @@ def evolution_one_var(i_var):
             
             # - Structurels
             for _ in range(n_voisin_S):
-                new_f = mutation(p_f, memory, n_mut)
+                new_f = mutation(p_f, memory, n_mut, gen)
                 if new_f != None and validate_function(new_f):  # Vérifie si la nouvelle fonction est valide
                     new_fit = fitness(new_f, i_var)
                     if isinstance(new_fit, (int, sy.Float)) and abs(new_fit) < float('inf'):  # Vérifie si l'écart est un nombre réel
@@ -278,6 +281,7 @@ def evolution_one_var(i_var):
             best_f_10 = population[0][0]
             a = time.time()
             
+    print("end evolution")
     return population[0]  # Retourne le meilleur individu après l'évolution
 
 def evolution():
